@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: netpath-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_secret
+      MYSQL_DATABASE: netpath_db
+      MYSQL_USER: netpath_user
+      MYSQL_PASSWORD: netpath_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_secret"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  netpath-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: netpath-api
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "mysql+pymysql://netpath_user:netpath_password@mysql:3306/netpath_db"
+      ENVIRONMENT: "production"
+      ALLOW_PRIVATE_IPS: "true"
+      ALLOWLISTED_HOSTS: "test-service-a,test-service-b,test-service-c,localhost,127.0.0.1"
+      LOG_LEVEL: "INFO"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  netpath-ui:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: netpath-ui
+    restart: always
+    depends_on:
+      - netpath-api
+    ports:
+      - "3000:80"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: netpath-prometheus
+    restart: always
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: netpath-grafana
+    restart: always
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3001:3000"
+
+  test-service-a:
+    build:
+      context: ./test-lab/service-a
+      dockerfile: Dockerfile
+    container_name: test-service-a
+    ports:
+      - "8001:8001"
+
+  test-service-b:
+    build:
+      context: ./test-lab/service-b
+      dockerfile: Dockerfile
+    container_name: test-service-b
+    ports:
+      - "8002:8002"
+
+  test-service-c:
+    build:
+      context: ./test-lab/service-c
+      dockerfile: Dockerfile
+    container_name: test-service-c
+    ports:
+      - "8003:8003"
+
+volumes:
+  mysql_data:
